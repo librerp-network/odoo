@@ -1137,7 +1137,8 @@ class AccountTax(models.Model):
 
         base_values = self.env.context.get('base_values')
         if not base_values:
-            total_excluded = total_included = base = round(price_unit * quantity, prec)
+            # Tax should be calculated from rounded price subtotal
+            total_excluded = total_included = base = currency.round(price_unit * quantity)
         else:
             total_excluded, total_included, base = base_values
 
