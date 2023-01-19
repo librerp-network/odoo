@@ -107,3 +107,9 @@ they make buying decisions, in store or online.
 With Odoo, you get a 360° customer view, including cross-channel sales,
 interaction history, profiles, and more.
 
+# Changelog
+
+
+_**1.0.1_a (2023-01-12)**_
+
+- [FIX] Corretta vista modello pos.order (pos_order_view.xml) per forzare salvataggio campo nascosto tax_ids altrimenti gli articoli inseriti modificando il PoS Order risultano senza tassa 
