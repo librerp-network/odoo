@@ -250,18 +250,7 @@ class PosOrder(models.Model):
                     group_done.add(tax.id)
                     children |= _flatten_tax_and_children(tax.children_tax_ids, group_done)
             return taxes + children
-
-        # Tricky, via the workflow, we only have one id in the ids variable
-        """Create a account move line of order grouped by products or not."""
-        IrProperty = self.env['ir.property']
-        ResPartner = self.env['res.partner']
-
-        if session and not all(session.id == order.session_id.id for order in self):
-            raise UserError(_('Selected orders do not have the same session!'))
-
-        grouped_data = {}
-        have_to_group_by = session and session.config_id.group_by or False
-        rounding_method = session and session.config_id.company_id.tax_calculation_rounding_method
+        # end _flatten_tax_and_children
 
         def add_anglosaxon_lines(grouped_data):
             Product = self.env['product.product']
@@ -297,6 +286,20 @@ class PosOrder(models.Model):
                                 'debit': line2['debit'] or 0.0,
                                 'partner_id': line2['partner_id']
                             })
+        # end add_anglosaxon_lines
+
+        # Tricky, via the workflow, we only have one id in the ids variable
+        """Create a account move line of order grouped by products or not."""
+        IrProperty = self.env['ir.property']
+        ResPartner = self.env['res.partner']
+
+        if session and not all(session.id == order.session_id.id for order in self):
+            raise UserError(_('Selected orders do not have the same session!'))
+
+        grouped_data = {}
+        have_to_group_by = session and session.config_id.group_by or False
+        rounding_method = session and session.config_id.company_id.tax_calculation_rounding_method
+
 
         for order in self.filtered(lambda o: not o.account_move or o.state == 'paid'):
             current_company = order.sale_journal.company_id
@@ -320,6 +323,7 @@ class PosOrder(models.Model):
                 key = self._get_account_move_line_group_data_type_key(data_type, values, {'rounding_method': rounding_method})
                 if not key:
                     return
+                # end if
 
                 grouped_data.setdefault(key, [])
 
@@ -381,23 +385,90 @@ class PosOrder(models.Model):
                 # Just like for invoices, a group of taxes must be present on this base line
                 # As well as its children
                 base_line_tax_ids = _flatten_tax_and_children(line.tax_ids_after_fiscal_position).filtered(lambda tax: tax.type_tax_use in ['sale', 'none'])
-                data = {
+
+                has_credit = (amount_subtotal > 0) and amount_subtotal
+                has_debit = (amount_subtotal < 0) and -amount_subtotal
+                is_zero = not has_credit and not has_debit
+
+                analytic_account = self._prepare_analytic_account(line)
+
+                template_data = {
                     'name': name,
                     'quantity': line.qty,
                     'product_id': line.product_id.id,
                     'account_id': income_account,
-                    'analytic_account_id': self._prepare_analytic_account(line),
-                    'credit': ((amount_subtotal > 0) and amount_subtotal) or 0.0,
-                    'debit': ((amount_subtotal < 0) and -amount_subtotal) or 0.0,
+                    'analytic_account_id': analytic_account,
                     'tax_ids': [(6, 0, base_line_tax_ids.ids)],
                     'partner_id': partner_id
                 }
-                if cur != cur_company:
-                    data['currency_id'] = cur.id
-                    data['amount_currency'] = -abs(line.price_subtotal) if data.get('credit') else abs(line.price_subtotal)
-                    amount_cur_company += data['credit'] - data['debit']
-                insert_data('product', data)
-                move_lines.append({'data_type': 'product', 'values': data})
+
+                # Line at zero (credit = 0 and debit = 0)
+                if is_zero:
+
+                    zero_line_data = template_data.copy()
+
+                    zero_line_data['credit'] = 0.0
+                    zero_line_data['debit'] = 0.0
+
+                    if cur != cur_company:
+                        zero_line_data['currency_id'] = cur.id
+                        zero_line_data['amount_currency'] = 0.0
+                    # end if
+
+                    insert_data('product', zero_line_data)
+
+                    move_lines.append({
+                        'data_type': 'product',
+                        'values': zero_line_data
+                    })
+
+                else:
+
+                    # Line has "credit" > 0
+                    # (maybe it also has "debit" > 0 but this case is managed in the next "if" block)
+                    if has_credit:
+
+                        credit_line_data = template_data.copy()
+
+                        credit_line_data['credit'] = amount_subtotal
+                        credit_line_data['debit'] = 0.0
+
+                        if cur != cur_company:
+                            credit_line_data['currency_id'] = cur.id
+                            credit_line_data['amount_currency'] = -abs(line.price_subtotal)
+                            amount_cur_company += credit_line_data['credit']
+                        # end if
+
+                        insert_data('product', credit_line_data)
+
+                        move_lines.append({
+                            'data_type': 'product',
+                            'values': credit_line_data
+                        })
+                    # end if
+
+                    # Line has "debit" > 0
+                    # (maybe it also has "credit" > 0 but this case is managed in the previous "if" block)
+                    if has_debit:
+
+                        debit_line_data = template_data.copy()
+
+                        debit_line_data['credit'] = 0.0
+                        debit_line_data['debit'] = -amount_subtotal
+
+                        if cur != cur_company:
+                            debit_line_data['currency_id'] = cur.id
+                            debit_line_data['amount_currency'] = abs(line.price_subtotal)
+                            amount_cur_company += -debit_line_data['debit']
+                        # end if
+
+                        insert_data('product_debit', debit_line_data)
+                        move_lines.append({
+                            'data_type': 'product',
+                            'values': debit_line_data
+                        })
+                    # end if
+                # end if
 
                 # Create the tax lines
                 taxes = line.tax_ids_after_fiscal_position.filtered(lambda t: t.company_id.id == current_company.id)
