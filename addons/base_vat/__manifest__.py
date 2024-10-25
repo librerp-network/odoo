@@ -1,9 +1,8 @@
-# -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
-
+# noinspection PyStatementEffect
 {
     'name': 'VAT Number Validation',
-    'version': '1.0',
+    'version': '1.0a',
     'category': 'Accounting',
     'description': """
 VAT validation for Partner's VAT numbers.
