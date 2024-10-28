@@ -457,3 +457,14 @@ class ResPartner(models.Model):
         new VAT number starting with XI
         TODO: remove when stdnum is updated to 1.16 in supported distro"""
         return stdnum.util.get_cc_module('gb', 'vat').is_valid(vat) if stdnum else True
+
+    def check_vat_de(self, vat):
+        '''
+        Check Germany VAT number.
+        '''
+
+        if vat == '999999999':
+            return True
+        else:
+            import stdnum.de.vat
+            return stdnum.de.vat.is_valid(vat)
